@@ -76,8 +76,18 @@ end
 
 -- Get GUID for a unit token via Nampower GetUnitGUID (v3.0+)
 -- Returns: normalized GUID string, or nil
+-- CONFIRMED (external user report, 2026-09-08): "attempt to call global
+-- 'GetUnitGUID' (a nil value)" -- this called the raw global directly,
+-- bypassing the version-gated safe wrapper this addon already has
+-- (NampowerAPI.lua's API.GetUnitGUID, which checks
+-- API.features.hasGetUnitGUID/_G.GetUnitGUID before calling it). Anyone on
+-- Nampower older than v3.0 (or without Nampower at all) doesn't have this
+-- global, so the direct call threw instead of degrading gracefully. Root
+-- cause is that user's Nampower version -- but this addon should never
+-- crash over an optional API it already knows how to check for. Route
+-- through the existing safe wrapper instead.
 function CleveRoids.GetGUID(unit)
-    local guid = GetUnitGUID(unit)
+    local guid = CleveRoids.NampowerAPI and CleveRoids.NampowerAPI.GetUnitGUID(unit)
     if guid then return tostring(guid) end
     return nil
 end
