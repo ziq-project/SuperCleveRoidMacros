@@ -1,5 +1,5 @@
 ## Interface: 11200
-## Author: DWG, _brain, Torio, yani9o, Avitasia
+## Author: DWG, _brain, Torio, yani9o, Avitasia | a Project Legacy fork by ziq
 ## Title: [Super]CleveRoidMacros
 ## Notes: /cleveroid for settings
 ## Version: @project-version@
