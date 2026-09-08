@@ -1,6 +1,6 @@
 ## Interface: 11200
-## Author: DWG, _brain, Torio, yani9o, Avitasia | a Project Legacy fork by ziq
-## Title: [Super]CleveRoidMacros |cff7fff7f - Project Legacy|r
+## Author: DWG, _brain, Torio, yani9o, Avitasia
+## Title: [Super]CleveRoidMacros
 ## Notes: /cleveroid for settings
 ## Version: @project-version@
 ## OptionalDeps: ClassicFocus, FocusFrame, pfUI, SuperMacro, Bongos_ActionBar, Cursive, XPerl, LunaUnitFrames, DragonflightReloaded, -Dragonflight3
