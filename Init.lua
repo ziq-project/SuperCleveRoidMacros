@@ -25,6 +25,10 @@ CleveRoids.hasTurtle   = (type(_G.TURTLE_WOW_VERSION) ~= "nil")
 CleveRoids.supported   = CleveRoids.hasTurtle
 
 CleveRoids.ParsedMsg = {}
+-- Bracket-group expansion cache (see CleveRoids.ExpandBracketGroups in
+-- Utility.lua) -- ported from brues-code/SuperCleveRoidMacros (upstream),
+-- 2026-09-11.
+CleveRoids.ExpandedGroups = {}
 CleveRoids.Items     = {}
 CleveRoids.Spells    = {}
 CleveRoids.PetSpells = {}

@@ -624,6 +624,74 @@ function CleveRoids.splitStringIgnoringQuotes(str, separator)
     return result
 end
 
+-- Ported from brues-code/SuperCleveRoidMacros (upstream), 2026-09-11.
+-- Splits a leading run of bracket groups off a clause: "[a][b] Spell" ->
+-- prefix "", groups {"[a]","[b]"}, restStart pointing at "Spell". The prefix
+-- captures any leading ?/!/~ tooltip markers so they survive expansion.
+-- Quote-aware so a "]" inside a quoted string (e.g. an item name) doesn't
+-- end the group early.
+function CleveRoids.ScanBracketGroups(msg)
+    local groups = { n = 0 }
+    if not msg then return "", groups, 1 end
+
+    local len = string.len(msg)
+    local _, prefixEnd = string.find(msg, "^[%s%?!~]*")
+    local prefix = string.sub(msg, 1, prefixEnd)
+    local i = prefixEnd + 1
+
+    while i <= len and string.sub(msg, i, i) == "[" do
+        local close = nil
+        local inQuotes = false
+        for j = i + 1, len do
+            local c = string.sub(msg, j, j)
+            if c == "\"" then
+                inQuotes = not inQuotes
+            elseif c == "]" and not inQuotes then
+                close = j
+                break
+            end
+        end
+        if not close then break end
+
+        groups.n = groups.n + 1
+        groups[groups.n] = string.sub(msg, i, close)
+        local _, wsEnd = string.find(msg, "^%s*", close + 1)
+        i = wsEnd + 1
+    end
+
+    if groups.n == 0 then
+        return prefix, groups, 1
+    end
+    return prefix, groups, i
+end
+
+--- Single-group variants of a multi-group clause: `[a][b] Spell` becomes
+--- { "[a] Spell", "[b] Spell", n = 2 }. nil for anything with fewer than two
+--- groups so callers take their normal path without allocating. Memoised per
+--- clause string in CleveRoids.ExpandedGroups (false marks "nothing to expand").
+function CleveRoids.ExpandBracketGroups(msg)
+    if not msg or not string.find(msg, "%[") then return nil end
+
+    local cached = CleveRoids.ExpandedGroups[msg]
+    if cached ~= nil then
+        return cached or nil
+    end
+
+    local variants = nil
+    local prefix, groups, restStart = CleveRoids.ScanBracketGroups(msg)
+    if groups.n > 1 then
+        local rest = string.sub(msg, restStart)
+        if rest ~= "" then rest = " " .. rest end
+        variants = { n = groups.n }
+        for i = 1, groups.n do
+            variants[i] = prefix .. groups[i] .. rest
+        end
+    end
+
+    CleveRoids.ExpandedGroups[msg] = variants or false
+    return variants
+end
+
 function CleveRoids.Print(...)
     local c = "|cFF4477FFCleveR|r|cFFFFFFFFoid :: |r"
     local out = ""
@@ -664,6 +732,25 @@ function CleveRoids.PrintT(t, depth)
             end
         end
     end
+end
+
+-- Ported from brues-code/SuperCleveRoidMacros (upstream), 2026-09-11.
+CleveRoids.buttons = {
+    ['1'] = 'LeftButton',
+    ['2'] = 'RightButton',
+    ['3'] = 'MiddleButton',
+    ['4'] = 'Button4',
+    ['5'] = 'Button5',
+}
+
+--- True while any mapped mouse button is held. Backs the argument-less [button] /
+--- [nobutton], mirroring how a bare [mod] means "any modifier". Bare [nobutton] is
+--- the practical "activated by a keybind, not a click" test.
+function CleveRoids.AnyMouseButtonDown()
+    for _, name in pairs(CleveRoids.buttons) do
+        if IsMouseButtonDown(name) then return true end
+    end
+    return false
 end
 
 CleveRoids.kmods = {

@@ -3249,6 +3249,26 @@ function CleveRoids.ValidatePowerLost(unit, operator, amount)
     return false
 end
 
+-- Ported from brues-code/SuperCleveRoidMacros (upstream), 2026-09-11.
+-- Checks the given unit's spell haste percentage vs the given amount
+-- unit: The unit we're checking
+-- operator: valid comparitive operator symbol
+-- amount: The required amount, in percent (0 = unhasted, negative = slowed)
+-- returns: True or false
+-- NOTE: the shared arg parser doesn't accept a sign on the amount, so a
+-- specific negative threshold ([myspellhaste:<-10]) can't be written; use
+-- [myspellhaste:<0] to test for being slowed at all.
+function CleveRoids.ValidateSpellHaste(unit, operator, amount)
+    if not unit or not operator or not amount then return false end
+    local haste = CleveRoids.ClassicAPI.UnitSpellHaste(unit)
+
+    if CleveRoids.operators[operator] then
+        return CleveRoids.comparators[operator](haste, amount)
+    end
+
+    return false
+end
+
 -- Checks whether or not the given unit has hp in percent vs the given amount
 -- unit: The unit we're checking
 -- operator: valid comparitive operator symbol
@@ -5517,6 +5537,31 @@ CleveRoids.Keywords = {
         end, conditionals, "nomod")
     end,
 
+    -- Ported from brues-code/SuperCleveRoidMacros (upstream), 2026-09-11.
+    -- [button:N] — true while mouse button N is held (1=Left, 2=Right, 3=Middle,
+    -- 4/5=extra). Routed through Multi so OR/AND lists and repeated groups behave
+    -- like every other argument conditional ([button:1/2] = left or right).
+    -- [button] with no argument — true if any mapped mouse button is held.
+    button = function(conditionals)
+        if type(conditionals.button) ~= "table" then
+            return CleveRoids.AnyMouseButtonDown()
+        end
+        return Multi(conditionals.button, function(button)
+            local name = CleveRoids.buttons[button]
+            return name and IsMouseButtonDown(name) or false
+        end, conditionals, "button")
+    end,
+
+    nobutton = function(conditionals)
+        if type(conditionals.nobutton) ~= "table" then
+            return not CleveRoids.AnyMouseButtonDown()
+        end
+        return NegatedMulti(conditionals.nobutton, function(button)
+            local name = CleveRoids.buttons[button]
+            return not (name and IsMouseButtonDown(name))
+        end, conditionals, "nobutton")
+    end,
+
     -- [keydown:X] — true while key X is held (Nampower v2.41+ KEY_DOWN/KEY_UP events)
     -- [keydown] with no argument — true if any non-meta key is currently held
     keydown = function(conditionals)
@@ -6456,6 +6501,31 @@ CleveRoids.Keywords = {
 
             return CleveRoids.ValidateLevel("player", args.operator, args.amount)
         end, conditionals, "mylevel")
+    end,
+
+    -- Ported from brues-code/SuperCleveRoidMacros (upstream), 2026-09-11.
+    myspellhaste = function(conditionals)
+        return Multi(conditionals.myspellhaste, function(args)
+            if type(args) ~= "table" then return false end
+
+            -- Handle multi-comparison (e.g., >50&<80)
+            if args.comparisons and type(args.comparisons) == "table" then
+                local haste = CleveRoids.ClassicAPI.UnitSpellHaste("player")
+
+                -- ALL comparisons must pass (AND logic)
+                for _, comp in ipairs(args.comparisons) do
+                    if not CleveRoids.operators[comp.operator] then
+                        return false
+                    end
+                    if not CleveRoids.comparators[comp.operator](haste, comp.amount) then
+                        return false
+                    end
+                end
+                return true
+            end
+
+            return CleveRoids.ValidateSpellHaste("player", args.operator, args.amount)
+        end, conditionals, "myspellhaste")
     end,
 
     myhp = function(conditionals)

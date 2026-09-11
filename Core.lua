@@ -1430,6 +1430,19 @@ function CleveRoids.ExecuteMacroBody(body,inline)
                     cmdHandled = true
                 end
             end
+
+            -- FIX: Handle /stopchanneling directly - not a native vanilla WoW
+            -- command either, same "without SuperMacro" routing gap as
+            -- startattack/stopattack above.
+            if not cmdHandled then
+                local _, _, stopchannelingArgs = string.find(trimmed, "^/stopchanneling%s*(.*)")
+                if stopchannelingArgs then
+                    if SlashCmdList.STOPCHANNELING then
+                        SlashCmdList.STOPCHANNELING(stopchannelingArgs)
+                    end
+                    cmdHandled = true
+                end
+            end
         end
 
         -- For all other commands, use ChatEdit_SendText
@@ -2239,6 +2252,18 @@ function CleveRoids.AdvanceSequence(sequence)
 end
 
 function CleveRoids.TestAction(cmd, args)
+    -- Ported from brues-code/SuperCleveRoidMacros (upstream), 2026-09-11.
+    -- `[a][b] Spell`: first passing group wins. The second return names the
+    -- clause that passed so the display path can read that group's @unit.
+    local variants = CleveRoids.ExpandBracketGroups(args)
+    if variants then
+        for i = 1, variants.n do
+            local r, passed = CleveRoids.TestAction(cmd, variants[i])
+            if r then return r, passed end
+        end
+        return
+    end
+
     local msg, conditionals = CleveRoids.GetParsedMsg(args)
 
     -- Nil-safe guards
@@ -2332,6 +2357,18 @@ function CleveRoids.DoWithConditionals(msg, hook, fixEmptyTargetFunc, targetBefo
     -- Check macro stop flags (skip non-control commands when flag is set)
     -- This enables /stopmacro, /skipmacro, /firstaction, /nofirstaction to work without SuperMacro for vanilla macros
     if (CleveRoids.stopMacroFlag or CleveRoids.skipMacroFlag) and action ~= "STOPMACRO" and action ~= "SKIPMACRO" and action ~= "FIRSTACTION" and action ~= "NOFIRSTACTION" then
+        return false
+    end
+
+    -- Ported from brues-code/SuperCleveRoidMacros (upstream), 2026-09-11.
+    -- `[a][b] Spell`: try each group as its own clause, first pass wins -- the
+    -- same walk DoCast makes over `[a] Spell; [b] Spell`.
+    local variants = CleveRoids.ExpandBracketGroups(msg)
+    if variants then
+        for i = 1, variants.n do
+            local r = CleveRoids.DoWithConditionals(variants[i], hook, fixEmptyTargetFunc, targetBeforeAction, action)
+            if r then return r end
+        end
         return false
     end
 
@@ -2671,22 +2708,39 @@ local function ResolvePfCastUnit()
     return nil
 end
 
+-- One /pfcast clause. If conditionals are present but no explicit @unit, inject the
+-- pfUI-resolved unit so all conditionals ([help], [nodebuff:X], etc.) evaluate against
+-- the same unit pfUI would cast on, and the final CastSpellByName gets the correct
+-- unit token. Module-level to avoid a closure per call.
+-- Ported from brues-code/SuperCleveRoidMacros (upstream), 2026-09-11.
+local function PfCastClause(v)
+    if string.find(v, "%[") and not string.find(v, "@") then
+        local unit = ResolvePfCastUnit()
+        if unit then
+            v = string.gsub(v, "%[", "[@" .. unit .. ",", 1)
+        end
+    end
+    return CleveRoids.DoWithConditionals(v, CleveRoids.Hooks.PFCAST_SlashCmd, CleveRoids.FixEmptyTarget, false, CastSpellByName)
+end
+
 -- /pfcast with CleveRoids conditionals: evaluate conditionals then cast via pfUI's mouseover chain.
 -- Called from the SlashCmdList.PFCAST hook (set up by Extensions/Mouseover/pfUI.lua after pfUI loads).
 function CleveRoids.DoPfCast(msg)
     local parts = CleveRoids.splitStringIgnoringQuotes(msg)
     for i = 1, table.getn(parts) do
-        local v = parts[i]
-        -- If conditionals are present but no explicit @unit, inject the pfUI-resolved unit so
-        -- all conditionals ([help], [nodebuff:X], etc.) evaluate against the same unit pfUI
-        -- would cast on, and the final CastSpellByName gets the correct unit token.
-        if string.find(v, "%[") and not string.find(v, "@") then
-            local unit = ResolvePfCastUnit()
-            if unit then
-                v = string.gsub(v, "%[", "[@" .. unit .. ",", 1)
+        -- Expand `[a][b] Spell` here rather than leaving it to DoWithConditionals so
+        -- every group without its own @unit gets the injection, not just the first.
+        local variants = CleveRoids.ExpandBracketGroups(parts[i])
+        local handled
+        if variants then
+            for j = 1, variants.n do
+                handled = PfCastClause(variants[j])
+                if handled then break end
             end
+        else
+            handled = PfCastClause(parts[i])
         end
-        if CleveRoids.DoWithConditionals(v, CleveRoids.Hooks.PFCAST_SlashCmd, CleveRoids.FixEmptyTarget, false, CastSpellByName) then
+        if handled then
             if CleveRoids.stopOnCastFlag then
                 CleveRoids.stopMacroFlag = true
             end
@@ -2722,6 +2776,28 @@ function CleveRoids.DoTarget(msg)
     -- Check macro stop flags
     if CleveRoids.stopMacroFlag or CleveRoids.skipMacroFlag then
         return false
+    end
+
+    -- Ported from brues-code/SuperCleveRoidMacros (upstream), 2026-09-11.
+    -- Conditional /target takes `;` clauses and `[a][b]` groups like /cast does:
+    -- the first clause or group that finds a unit wins. A single-group clause
+    -- falls through to the resolution below.
+    if msg and string.find(msg, "%[") then
+        local parts = CleveRoids.splitStringIgnoringQuotes(msg)
+        local n = table.getn(parts)
+        if n > 1 then
+            for i = 1, n do
+                if CleveRoids.DoTarget(parts[i]) then return true end
+            end
+            return false
+        end
+        local variants = CleveRoids.ExpandBracketGroups(parts[1])
+        if variants then
+            for i = 1, variants.n do
+                if CleveRoids.DoTarget(variants[i]) then return true end
+            end
+            return false
+        end
     end
 
     local action, conditionals = CleveRoids.GetParsedMsg(msg)
@@ -3066,6 +3142,56 @@ function CleveRoids.DoConditionalStopCasting(msg)
     local parts = CleveRoids.splitStringIgnoringQuotes(msg)
     for i = 1, table.getn(parts) do
         if CleveRoids.DoWithConditionals(parts[i], nil, CleveRoids.FixEmptyTarget, false, _stopCastingAction) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Stop channeling on the next tick (nampower v2.18+), behind /stopchanneling.
+-- The underlying API no-ops in two cases and a command that does nothing
+-- without saying why reads as broken, so each gets a one-shot warning -- the
+-- same treatment the [rooted] conditional gives a too-old nampower.
+-- Ported from brues-code/SuperCleveRoidMacros (upstream), 2026-09-11.
+local _stopChannelingWarned = {}
+local function warnStopChanneling(key, reason)
+    if _stopChannelingWarned[key] then return end
+    _stopChannelingWarned[key] = true
+    DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[SuperCleveRoidMacros]|r /stopchanneling "
+        .. reason .. ".", 1, 0.5, 0.5)
+end
+
+function CleveRoids.StopChanneling()
+    local API = CleveRoids.NampowerAPI
+
+    -- Nothing was sent: nampower is absent or predates ChannelStopCastingNextTick.
+    if not API.StopChannelNextTick() then
+        warnStopChanneling("version", "requires Nampower v2.18.0 or newer")
+        return false
+    end
+
+    -- The call went through, but nampower only acts on it while channel
+    -- queueing is on, so the channel would run to completion regardless.
+    if not API.IsQueueingEnabled("channeling") then
+        warnStopChanneling("setting", "requires Nampower's NP_QueueChannelingSpells setting to be enabled")
+        return false
+    end
+
+    return true
+end
+
+local function _stopChannelingAction()
+    CleveRoids.StopChanneling()
+end
+
+-- Attempts to conditionally interrupt channeling. Returns false if no conditionals are found.
+function CleveRoids.DoConditionalStopChanneling(msg)
+    if not string.find(msg, "%[") then return false end
+
+    -- PERFORMANCE: Use numeric iteration to avoid pairs() iterator allocation
+    local parts = CleveRoids.splitStringIgnoringQuotes(msg)
+    for i = 1, table.getn(parts) do
+        if CleveRoids.DoWithConditionals(parts[i], nil, CleveRoids.FixEmptyTarget, false, _stopChannelingAction) then
             return true
         end
     end
@@ -5663,6 +5789,7 @@ end
 function CleveRoids.RebuildMacros()
     CleveRoids.currentSequence = nil
     CleveRoids.ParsedMsg = {}
+    CleveRoids.ExpandedGroups = {}
     CleveRoids.Macros = {}
     CleveRoids.Actions = {}
     CleveRoids.Sequences = {}
